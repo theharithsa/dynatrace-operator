@@ -6,6 +6,12 @@ import (
 	"os"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"strings"
+	"context"
 	dynatracestatus "github.com/Dynatrace/dynatrace-operator/pkg/api/status"
 	"github.com/Dynatrace/dynatrace-operator/pkg/api/v1beta4/dynakube"
 	dtclient "github.com/Dynatrace/dynatrace-operator/pkg/clients/dynatrace"
@@ -96,6 +102,29 @@ func (controller *Controller) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Secret{}).
 		Complete(controller)
 }
+
+
+// getMatchingNamespaces returns a comma-separated list of namespaces matching the DynaKube namespaceSelector.
+func getMatchingNamespaces(ctx context.Context, c client.Client, dk *dynakube.DynaKube) (string, error) {
+	if dk.Spec.NamespaceSelector.MatchLabels == nil {
+		return "", nil
+	}
+
+	labelSelector := labels.SelectorFromSet(dk.Spec.NamespaceSelector.MatchLabels)
+	nsList := &corev1.NamespaceList{}
+	err := c.List(ctx, nsList, &client.ListOptions{LabelSelector: labelSelector})
+	if err != nil {
+		return "", err
+	}
+
+	var filtered []string
+	for _, ns := range nsList.Items {
+		filtered = append(filtered, ns.Name)
+	}
+
+	return strings.Join(filtered, ","), nil
+}
+
 
 // Controller reconciles a DynaKube object
 type Controller struct {
@@ -252,6 +281,19 @@ func (controller *Controller) reconcileDynaKube(ctx context.Context, dk *dynakub
 	}
 
 	dk.Status.KubeSystemUUID = controller.clusterID
+
+	namespaceFilter, err := getMatchingNamespaces(ctx, controller.client, dk)
+	if err != nil {
+		log.Error(err, "Failed to get filtered namespaces for platform metrics")
+		return err
+	}
+	log.Info("Namespace filter for platform metrics", "namespaces", namespaceFilter)
+
+	// Optional: Set it to status if you want visibility in DynaKube CR
+	dk.Annotations = map[string]string{
+		"platform.dynatrace.com/namespace-filter": namespaceFilter,
+	}
+
 
 	log.Info("start reconciling deployment meta data")
 

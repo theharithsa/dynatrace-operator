@@ -50,8 +50,16 @@ func (mod KubernetesMonitoringModifier) Modify(sts *appsv1.StatefulSet) error {
 	baseContainer.VolumeMounts = append(baseContainer.VolumeMounts, mod.getVolumeMounts()...)
 	sts.Spec.Template.Spec.InitContainers = append(sts.Spec.Template.Spec.InitContainers, mod.getInitContainers()...)
 
+	if namespaceFilter, ok := mod.dk.Annotations["platform.dynatrace.com/namespace-filter"]; ok && namespaceFilter != "" {
+		baseContainer.Env = append(baseContainer.Env, corev1.EnvVar{
+			Name:  "DT_K8S_NAMESPACE_FILTER",
+			Value: namespaceFilter,
+		})
+	}
+
 	return nil
 }
+
 
 func (mod KubernetesMonitoringModifier) getInitContainers() []corev1.Container {
 	volumeMounts := []corev1.VolumeMount{
